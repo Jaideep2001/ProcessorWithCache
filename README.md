@@ -9,20 +9,20 @@ The processor follows the standard 5-stage pipeline:
 
 Each pipeline stage is separated by dedicated pipeline registers to maintain smooth instruction flow.
 ## Major Components
-| Module            | Description                                                                                                                       | 
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------  | 
-| instructionMemory | Fetches 32-bit instructions from a ROM (program_cacheTest.mem).                                                                   |
-| registerFile      | 32 x 8-bit register file with read/write support. Auto-dumps to reg_dump.mem.                                                     |
-| decode            | Decodes R-type, I-type, load (lw), and store (sw) instructions. Generates ALU control signals.                                    |
-| ALU               | 	8-bit ALU supporting operations like ADD, SUB, AND, OR, XOR, SLL, SRL, and SLT.                                                 |
-| storage           | 256 x 8-bit main memory with read/write and intentional delays to simulate memory access times. Dumps to memory_dump.mem.         |
-| cacheMemory       | 4-block, direct-mapped cache with valid, dirty, and tag bits. Interfaces with storage for cache misses. Dumps to cache_dump.mem.  |
-| ifid_register     | Pipeline register between Instruction Fetch and Decode stages.                                                                    |
-| idex_register     | Pipeline register between Decode and Execute stages.                                                                              |
-| exmem_register    | Pipeline register between Execute and Memory stages.                                                                              |
-| memwb_register    | Pipeline register between Memory and Write Back stages.                                                                           |
-| aluSrcMuxer       | Selects between register data and immediate values for ALU operations.                                                            |
-| wbDataMux         | Selects between memory read data and ALU result for register write-back.                                                          |
+| Module            | Description                                                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------  | 
+| instructionMemory | Fetches 32-bit instructions from a ROM (program_cacheTest.mem).                                                                          |
+| registerFile      | 32 x 8-bit register file with read/write support. Auto-dumps to reg_dump.mem.                                                            |
+| decode            | Decodes R-type, I-type, load (lw), and store (sw) instructions. Generates ALU control signals.                                           |
+| ALU               | 	8-bit ALU supporting operations like ADD, SUB, AND, OR, XOR, SLL, SRL, and SLT.                                                        |
+| storage           | 256 x 8-bit main memory with read/write and intentional delays to simulate memory access times. Dumps to memory_dump.mem.                |
+| cacheMemory       | 4-block, 4-byte, direct-mapped cache with valid, dirty, and tag bits. Interfaces with storage for cache misses. Dumps to cache_dump.mem. |
+| ifid_register     | Pipeline register between Instruction Fetch and Decode stages.                                                                           |
+| idex_register     | Pipeline register between Decode and Execute stages.                                                                                     |
+| exmem_register    | Pipeline register between Execute and Memory stages.                                                                                     |
+| memwb_register    | Pipeline register between Memory and Write Back stages.                                                                                  |
+| aluSrcMuxer       | Selects between register data and immediate values for ALU operations.                                                                   |
+| wbDataMux         | Selects between memory read data and ALU result for register write-back.                                                                 |
 
 ## Supported Instruction Types
 
