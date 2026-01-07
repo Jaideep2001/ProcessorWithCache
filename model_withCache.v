@@ -7,14 +7,14 @@ module instructionMemory(
     output reg [31:0] instruction
 );
 
-    reg [31:0] memory[0:13]; // Internal ROM
+    reg [31:0] memory[0:14]; // Internal ROM
 
     initial begin
         $readmemh("program_cacheTest.mem", memory);
     end
     
-    always @(posedge clk) begin
-        instruction <= memory[address];
+    always @(*) begin
+        instruction = memory[address];
     end
 endmodule
 
@@ -203,6 +203,7 @@ always @(posedge clk) begin
     //Cache miss: gotta read
 
     else if ((cache[index] >> 32 ) & 1'b1) begin
+        //Dirty data has to be written to main memory
         if (readCache || writeCache) begin
             //hitOrMiss = 0;
             data_toMemory <= (cache[index] & 32'hFFFFFFFF);
@@ -234,102 +235,114 @@ module decode(
     input [31:0] instruction,
     output reg [3:0] aluTask,
     output reg [4:0] operand_1, destAddrReg, shift,
-    output reg [15:0] operand_2,
+    output reg [15:0] operand_2, jumpAddress,
     output reg regWrite, memRead, memWrite, aluSrc, memToReg //flags
 );
 
 /*
 Operation   Description	            Typical ALU Control Code
-ADD         Addition	            3'b001
-SUB         Subtraction	            3'b010
-AND         Bitwise AND	            3'b011
-OR          Bitwise OR	            3'b100
-XOR         Bitwise XOR 	        3'b101
-SLL         Shift Left Logical  	3'b110
-SRL         Shift Right Logical	    3'b111
-SLT         Set on Less Than (signed) 3'b1000
+ADD         Addition	            4'b001
+SUB         Subtraction	            4'b010
+AND         Bitwise AND	            4'b011
+OR          Bitwise OR	            4'b100
+XOR         Bitwise XOR 	        4'b101
+SLL         Shift Left Logical  	4'b110
+SRL         Shift Right Logical	    4'b111
+SLT         Set on Less Than (signed) 4'b1000
+LW          Load Word               4'b1001
+SW          Store Word              4'b1010
+BEQ         Branch If Equals        4'b1011
+BNE         Branch Not Equals       4'b1100
 */
 
 //R type instruction: Opcode (6bits), Reg1 (5 bits), Reg2 (5 bits), DestReg (5 bits), Shift (5 bits), Function (6bits)
 //I type instruction: Opcode (6bits), Reg1 (5 bits), Reg2 (5 bits), Immediate (16 bits)
+//J type instruction (branching. Not jumping yet): Opcode (6bits), Reg1 (5 bits), Reg2 (5 bits), Jump Target (16 bits)
 
 reg [5:0] opcode, funct;
 
 always @(*) begin
-    opcode <= (instruction >> 26);
+    opcode = (instruction >> 26);
 
     case((instruction >> 26))
         6'b000000: begin
-            regWrite <= 1'b1;
-            memRead <= 1'b0;
-            memWrite <= 1'b0;
-            memToReg <= 1'b0;
-            aluSrc <= 1'b0;
+            regWrite = 1'b1;
+            memRead = 1'b0;
+            memWrite = 1'b0;
+            memToReg = 1'b0;
+            aluSrc = 1'b0;
 
             //ADD R1, R2, R3: 000000 00010 00011 00001 00000 000001
 
-            funct <= (instruction & 6'b111111);
-            aluTask <= funct[3:0];
-            operand_1 <= ((instruction >> 21) & 5'b11111);
-            operand_2 <= ((instruction >> 16) & 5'b11111);
-            destAddrReg <= ((instruction >> 11) & 5'b11111);
-            shift <= ((instruction >> 6) & 5'b11111);
+            funct = (instruction & 6'b111111);
+            aluTask = funct[3:0];
+            operand_1 = ((instruction >> 21) & 5'b11111);
+            operand_2 = ((instruction >> 16) & 5'b11111);
+            destAddrReg = ((instruction >> 11) & 5'b11111);
+            shift = ((instruction >> 6) & 5'b11111);
 
         end
         6'b000001, 6'b000010, 6'b000011, 6'b000100, 6'b000101, 6'b000110, 6'b000111, 6'b001000: begin
-            regWrite <= 1'b1;
-            memRead <= 1'b0;
-            memWrite <= 1'b0;
-            memToReg <= 1'b0;
-            aluSrc <= 1'b1;
+            regWrite = 1'b1;
+            memRead = 1'b0;
+            memWrite = 1'b0;
+            memToReg = 1'b0;
+            aluSrc = 1'b1;
 
-            aluTask <= instruction[29:26];
+            aluTask = instruction[29:26];
 
-            //aluTask <= (instruction >> 26)[3:0];
+            //aluTask = (instruction >> 26)[3:0];
 
             //ADDI R1, R2, 50: 000001 00010 00001 0000000000110010
 
-            destAddrReg <= ((instruction >> 16) & 5'b11111);
-            operand_1 <= ((instruction >> 21) & 5'b11111);
-            operand_2 <= (instruction & 16'hFFFF);
+            destAddrReg = ((instruction >> 16) & 5'b11111);
+            operand_1 = ((instruction >> 21) & 5'b11111);
+            operand_2 = (instruction & 16'hFFFF);
         end
         6'b001001: begin //load word
-            regWrite <= 1'b1;
-            memRead <= 1'b1;
-            memWrite <= 1'b0;
-            memToReg <= 1'b1;
-            aluSrc <= 1'b1;
+            regWrite = 1'b1;
+            memRead = 1'b1;
+            memWrite = 1'b0;
+            memToReg = 1'b1;
+            aluSrc = 1'b1;
 
-            aluTask <= 4'b0001;
+            aluTask = 4'b0001;
 
             //LW R1, 100(R2): 001001 (op), 00010 (R2), 00001 (R1), 0000000001100100 (#100)
-            destAddrReg <= ((instruction >> 16) & 5'b11111);
-            operand_1 <= ((instruction >> 21) & 5'b11111);
-            operand_2 <= (instruction & 16'hFFFF);
+            destAddrReg = ((instruction >> 16) & 5'b11111);
+            operand_1 = ((instruction >> 21) & 5'b11111);
+            operand_2 = (instruction & 16'hFFFF);
         end
         6'b001010: begin //store word
-            memRead <= 1'b0;
-            memWrite <= 1'b1;
-            regWrite <= 1'b0;
-            memToReg <= 1'b0;
-            aluSrc <= 1'b1;
+            memRead = 1'b0;
+            memWrite = 1'b1;
+            regWrite = 1'b0;
+            memToReg = 1'b0;
+            aluSrc = 1'b1;
 
-            aluTask <= 4'b0001;
+            aluTask = 4'b0001;
 
             //SW R1, 100(R2): 001010 (op), 00010 (R2), 00001 (R1), 0000000001100100 (#100)
 
-            destAddrReg <= ((instruction >> 16) & 5'b11111);
-            operand_1 <= ((instruction >> 21) & 5'b11111);
-            operand_2 <= (instruction & 16'hFFFF);
+            destAddrReg = ((instruction >> 16) & 5'b11111);
+            operand_1 = ((instruction >> 21) & 5'b11111);
+            operand_2 = (instruction & 16'hFFFF);
+        end
+        6'b001011, 6'b001100: begin //branch
+            aluTask = instruction[29:26];
+            aluSrc = 1'b0;
+            operand_1 = ((instruction >> 21) & 5'b11111);
+            operand_2 = ((instruction >> 16) & 5'b11111);
+            jumpAddress = (instruction & 16'hFFFF);
         end
 
         default : begin
-        regWrite <= 0;
-        memRead <= 0;
-        memWrite <= 0;
-        memToReg <= 0;
-        aluSrc <= 0;
-        aluTask <= 4'b0000;
+        regWrite = 0;
+        memRead = 0;
+        memWrite = 0;
+        memToReg = 0;
+        aluSrc = 0;
+        aluTask = 4'b0000;
     end
     endcase
 end
@@ -364,7 +377,8 @@ module ALU(
     input [7:0] operand1,
     input [15:0] operand2,
     input [4:0] shamt,
-    output reg [7:0] result
+    output reg [7:0] result,
+    output reg jumpFlag
 );
 
 /*
@@ -377,41 +391,58 @@ XOR         Bitwise XOR 	        4'b101
 SLL         Shift Left Logical  	4'b110
 SRL         Shift Right Logical	    4'b111
 SLT         Set on Less Than (signed) 4'b1000
+BEQ         Branch If Equals        4'b1011
+BNE         Branch Not Equals       4'b1100
 */
 
 always @(*) begin
+    jumpFlag = 0;
     case (aluTask)
         4'b0001: begin
-            result <= operand1 + operand2[7:0];
+            result = operand1 + operand2[7:0];
         end
 
         4'b0010: begin
-            result <= operand1 - operand2[7:0];
+            result = operand1 - operand2[7:0];
         end
 
         4'b0011: begin
-            result <= operand1 & operand2[7:0];
+            result = operand1 & operand2[7:0];
         end
 
         4'b0100: begin
-            result <= operand1 | operand2[7:0];
+            result = operand1 | operand2[7:0];
         end
 
         4'b0101: begin
-            result <= operand1 ^ operand2[7:0];
+            result = operand1 ^ operand2[7:0];
         end
 
         4'b0110: begin
-            result <= operand1[7:0] << shamt;
+            result = operand1[7:0] << shamt;
         end
 
         4'b0111: begin
-            result <= operand1[7:0] >> shamt;
+            result = operand1[7:0] >> shamt;
         end
 
         4'b1000: begin
-            result <= (operand1 < operand2) ? 1 : 0;
+            result = (operand1 < operand2) ? 1 : 0;
         end 
+
+        4'b1011: begin
+            result = (operand1 == operand2) ? 1 : 0;
+            if (result == 1) begin
+                jumpFlag = 1;
+            end
+        end
+
+        4'b1100: begin
+            result = (operand1 != operand2) ? 1 : 0;
+            if (result == 1) begin
+                jumpFlag = 1;
+            end
+        end
 
         default: result <= 8'b0;
     endcase
@@ -422,14 +453,17 @@ endmodule
 
 module ifid_register(
     input clk,
+    input [5:0] programCounter,
     input stallForMemoryAccess,
     input [31:0] instruction,
-    output reg [31:0] instr_ifid
+    output reg [31:0] instr_ifid,
+    output reg [5:0] pc_ifid
 );
 
 always @(posedge clk) begin
     if (!(stallForMemoryAccess)) begin
         instr_ifid <= instruction;
+        pc_ifid <= programCounter;
     end
 end
 endmodule
@@ -437,17 +471,20 @@ endmodule
 //ID/EX: Holds decoded signals + register values.
 
 module idex_register(
+    input clear,
     input clk,
     input stallForMemoryAccess,
     input [3:0] aluTask,
     input [4:0] operand_1, destAddrReg, shift,
-    input [15:0] operand_2,
+    input [15:0] operand_2, jumpAddress,
     input regWrite, memRead, memWrite, aluSrc, memToReg,
+    input [5:0] pc_ifid,
 
     output reg [3:0] aluTask_idex,
     output reg [4:0] operand_1_idex, destAddrReg_idex, shift_idex,
-    output reg [15:0] operand_2_idex,
-    output reg regWrite_idex, memRead_idex, memWrite_idex, aluSrc_idex, memToReg_idex //flags
+    output reg [15:0] operand_2_idex, jumpAddress_idex,
+    output reg regWrite_idex, memRead_idex, memWrite_idex, aluSrc_idex, memToReg_idex, //flags
+    output reg [5:0] pc_idex
 );
 
 always @(posedge clk) begin
@@ -457,11 +494,13 @@ always @(posedge clk) begin
         destAddrReg_idex <= destAddrReg;
         shift_idex <= shift;
         operand_2_idex <= operand_2;
+        jumpAddress_idex <= jumpAddress;
         regWrite_idex <= regWrite;
         memRead_idex <= memRead;
         memWrite_idex <= memWrite;
         aluSrc_idex <= aluSrc;
         memToReg_idex <= memToReg;
+        pc_idex <= pc_ifid;
     end
 end
 endmodule
@@ -548,22 +587,25 @@ module top_level_processor(input clk);
 reg [5:0] pc = 0;
 wire [31:0] instruction;
 wire [31:0] instr_ifid;
+wire [5:0] pc_ifid;
 
 wire [3:0] aluTask;
 wire [4:0] operand_1, destAddrReg, shift;
-wire [15:0] operand_2;
+wire [15:0] operand_2, jumpAddress;
 wire regWrite, memRead, memWrite, aluSrc, memToReg; //flags
 
 wire [3:0] aluTask_idex;
 wire [4:0] operand_1_idex, destAddrReg_idex, shift_idex;
-wire [15:0] operand_2_idex;
+wire [15:0] operand_2_idex, jumpAddress_idex;
 wire regWrite_idex, memRead_idex, memWrite_idex, aluSrc_idex, memToReg_idex; //flags
+wire [5:0] pc_idex;
 
 wire [7:0] r1_reg, r2_reg, destAddVal_reg;
 
 wire [15:0] aluInput2;
 
 wire [7:0] alu_result;
+wire jumpFlag;
 
 wire [7:0] alu_result_exmem, r2_exmem, destAddVal_exmem;
 wire [4:0] dest_addr_exmem;
@@ -598,9 +640,11 @@ instructionMemory im(
 
 ifid_register iiReg(
     .clk(clk),
+    .programCounter(pc),
     .stallForMemoryAccess(stallForMemoryAccess),
     .instruction(instruction),
-    .instr_ifid(instr_ifid)
+    .instr_ifid(instr_ifid),
+    .pc_ifid(pc_ifid)
 );
 
 decode dec(
@@ -611,6 +655,7 @@ decode dec(
     .destAddrReg(destAddrReg),
     .shift(shift),
     .operand_2(operand_2),
+    .jumpAddress(jumpAddress_idex),
     .regWrite(regWrite),
     .memRead(memRead),
     .memWrite(memWrite),
@@ -626,22 +671,26 @@ idex_register ieReg(
     .destAddrReg(destAddrReg),
     .shift(shift),
     .operand_2(operand_2),
+    .jumpAddress(jumpAddress),
     .regWrite(regWrite),
     .memRead(memRead),
     .memWrite(memWrite),
     .aluSrc(aluSrc),
     .memToReg(memToReg),
+    .pc_ifid(pc_ifid),
 
     .aluTask_idex(aluTask_idex),
     .operand_1_idex(operand_1_idex), 
     .destAddrReg_idex(destAddrReg_idex), 
     .shift_idex(shift_idex),
     .operand_2_idex(operand_2_idex),
+    .jumpAddress_idex(jumpAddress),
     .regWrite_idex(regWrite_idex), 
     .memRead_idex(memRead_idex), 
     .memWrite_idex(memWrite_idex), 
     .aluSrc_idex(aluSrc_idex),
-    .memToReg_idex(memToReg_idex)
+    .memToReg_idex(memToReg_idex),
+    .pc_idex(pc_idex)
 );
 
 registerFile regis(
@@ -675,7 +724,8 @@ ALU exec(
     .operand1(r1_reg),
     .operand2(aluInput2),
     .shamt(shift_idex),
-    .result(alu_result)
+    .result(alu_result),
+    .jumpFlag(jumpFlag)
 );
 
 exmem_register emReg(
@@ -752,11 +802,17 @@ wbDataMux wbDataSelector(
     .dataToWrite(dataToWrite)
 );
 
+//CONTROL LOGIC
+
 assign stallForMemoryAccess = ~(hitOrMiss);
 
 always @(posedge clk) begin
 if (hitOrMiss != 0) begin
-    pc <= pc + 1;
+    if (jumpFlag == 1) begin
+        pc <= pc_idex + 1 + jumpAddress_idex[5:0];
+    end
+    else
+        pc <= pc + 1;
 end
 
 end
