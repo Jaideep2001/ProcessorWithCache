@@ -7,7 +7,7 @@ module instructionMemory(
     output reg [31:0] instruction
 );
 
-    reg [31:0] memory[0:14]; // Internal ROM
+    reg [31:0] memory[0:19]; // Internal ROM
 
     initial begin
         $readmemh("program_cacheTest.mem", memory);
@@ -230,12 +230,115 @@ always @(posedge clk) begin
 end
 endmodule
 
+// Branch History Table
+
+module branchHistoryTable(
+    input clk,
+    input [31:0] instruction,
+    input [5:0] programCounter,
+    input takenOrNot,
+    input [5:0] pc_idex,
+    input [3:0] aluTask_idex,
+    input predictionResult_idex,
+    output reg [15:0] jumpAddress,
+    output reg predictionResult
+);
+
+reg [1:0] bht_table[0:15];
+reg [6:0] opcode;
+reg [3:0] index;
+
+initial begin
+    $readmemb("BranchHistory.mem", bht_table);
+end
+
+//prediction algorithm
+always @(*) begin
+    opcode = (instruction >> 26);
+    index = programCounter[3:0];
+    jumpAddress = (instruction & 16'hFFFF);
+    if ((opcode == 6'b001011) | (opcode == 6'b001100)) begin
+        case (bht_table[index])
+            2'b00, 2'b01: begin
+                predictionResult = 0; //not taken
+            end
+            2'b10, 2'b11: begin
+                predictionResult = 1; //taken
+            end
+            default: begin
+                predictionResult = 0;
+            end
+        endcase
+    end
+    else begin
+        predictionResult = 0;
+    end
+    $writememb("BranchHistory.mem", bht_table);
+end
+
+//updation algorithm
+always @(posedge clk) begin
+    if ((aluTask_idex == 4'b1011) | (aluTask_idex == 4'b1100)) begin
+        case (takenOrNot)
+            1'b0: begin
+                if (bht_table[pc_idex[3:0]] != 2'b00) begin
+                    bht_table[pc_idex[3:0]] <= bht_table[pc_idex[3:0]] - 2'b01;
+                end
+            end
+            1'b1: begin
+                if (bht_table[pc_idex[3:0]] != 2'b11) begin
+                    bht_table[pc_idex[3:0]] <= bht_table[pc_idex[3:0]] + 2'b01;
+                end
+            end
+            default: begin
+                //do nothing at all
+            end
+        endcase
+    end
+end
+
+endmodule
+//IF/ID: Holds fetched instruction + PC.
+
+module ifid_register(
+    input clk,
+    input clear,
+    input predictionResult,
+    input [5:0] programCounter,
+    input stallForMemoryAccess,
+    input [31:0] instruction,
+    input [15:0] jumpAddress,
+    output reg [31:0] instr_ifid,
+    output reg [5:0] pc_ifid,
+    output reg [15:0] jumpAddress_ifid,
+    output reg predictionResult_ifid
+
+);
+
+always @(posedge clk) begin
+    if (!(stallForMemoryAccess)) begin
+        if (clear == 1) begin
+            instr_ifid <= 32'bx;
+            pc_ifid <= 6'bx;
+            jumpAddress_ifid <= 15'bx;
+            predictionResult_ifid <= 1'bx;
+        end
+        else begin
+            instr_ifid <= instruction;
+            pc_ifid <= programCounter;
+            jumpAddress_ifid <= jumpAddress;
+            predictionResult_ifid <= predictionResult;
+        end
+    end
+end
+endmodule
+
 module decode(
     input clk,
     input [31:0] instruction,
     output reg [3:0] aluTask,
     output reg [4:0] operand_1, destAddrReg, shift,
-    output reg [15:0] operand_2, jumpAddress,
+    output reg [15:0] operand_2,
     output reg regWrite, memRead, memWrite, aluSrc, memToReg //flags
 );
 
@@ -333,7 +436,6 @@ always @(*) begin
             aluSrc = 1'b0;
             operand_1 = ((instruction >> 21) & 5'b11111);
             operand_2 = ((instruction >> 16) & 5'b11111);
-            jumpAddress = (instruction & 16'hFFFF);
         end
 
         default : begin
@@ -345,6 +447,63 @@ always @(*) begin
         aluTask = 4'b0000;
     end
     endcase
+end
+endmodule
+
+//ID/EX: Holds decoded signals + register values.
+
+module idex_register(
+    input clk,
+    input clear,
+    input stallForMemoryAccess,
+    input predictionResult_ifid,
+    input [3:0] aluTask,
+    input [4:0] operand_1, destAddrReg, shift,
+    input [15:0] operand_2, jumpAddress,
+    input regWrite, memRead, memWrite, aluSrc, memToReg,
+    input [5:0] pc_ifid,
+
+    output reg [3:0] aluTask_idex,
+    output reg [4:0] operand_1_idex, destAddrReg_idex, shift_idex,
+    output reg [15:0] operand_2_idex, jumpAddress_idex,
+    output reg regWrite_idex, memRead_idex, memWrite_idex, aluSrc_idex, memToReg_idex, //flags
+    output reg [5:0] pc_idex,
+    output reg predictionResult_idex
+);
+
+always @(posedge clk) begin
+    if (!(stallForMemoryAccess)) begin
+        if (clear == 1) begin
+            aluTask_idex <= 4'bx;
+            operand_1_idex <= 5'bx;
+            destAddrReg_idex <= 5'bx;
+            shift_idex <= 5'bx;
+            operand_2_idex <= 16'bx;
+            jumpAddress_idex <= 16'bx;
+            regWrite_idex <= 1'bx;
+            memRead_idex <= 1'bx;
+            memWrite_idex <= 1'bx;
+            aluSrc_idex <= 1'bx;
+            memToReg_idex <= 1'bx;
+            pc_idex <= 6'bx;
+            predictionResult_idex <= 1'bx;
+        end
+        else begin
+            aluTask_idex <= aluTask;
+            operand_1_idex <= operand_1;
+            destAddrReg_idex <= destAddrReg;
+            shift_idex <= shift;
+            operand_2_idex <= operand_2;
+            jumpAddress_idex <= jumpAddress;
+            regWrite_idex <= regWrite;
+            memRead_idex <= memRead;
+            memWrite_idex <= memWrite;
+            aluSrc_idex <= aluSrc;
+            memToReg_idex <= memToReg;
+            pc_idex <= pc_ifid;
+            predictionResult_idex <= predictionResult_ifid;
+        end
+    end
 end
 endmodule
 
@@ -368,7 +527,6 @@ always @(*) begin
     endcase
 
 end
-
 endmodule
 
 module ALU(
@@ -449,66 +607,11 @@ always @(*) begin
 end
 endmodule
 
-//IF/ID: Holds fetched instruction + PC.
-
-module ifid_register(
-    input clk,
-    input [5:0] programCounter,
-    input stallForMemoryAccess,
-    input [31:0] instruction,
-    output reg [31:0] instr_ifid,
-    output reg [5:0] pc_ifid
-);
-
-always @(posedge clk) begin
-    if (!(stallForMemoryAccess)) begin
-        instr_ifid <= instruction;
-        pc_ifid <= programCounter;
-    end
-end
-endmodule
-
-//ID/EX: Holds decoded signals + register values.
-
-module idex_register(
-    input clear,
-    input clk,
-    input stallForMemoryAccess,
-    input [3:0] aluTask,
-    input [4:0] operand_1, destAddrReg, shift,
-    input [15:0] operand_2, jumpAddress,
-    input regWrite, memRead, memWrite, aluSrc, memToReg,
-    input [5:0] pc_ifid,
-
-    output reg [3:0] aluTask_idex,
-    output reg [4:0] operand_1_idex, destAddrReg_idex, shift_idex,
-    output reg [15:0] operand_2_idex, jumpAddress_idex,
-    output reg regWrite_idex, memRead_idex, memWrite_idex, aluSrc_idex, memToReg_idex, //flags
-    output reg [5:0] pc_idex
-);
-
-always @(posedge clk) begin
-    if (!(stallForMemoryAccess)) begin
-        aluTask_idex <= aluTask;
-        operand_1_idex <= operand_1;
-        destAddrReg_idex <= destAddrReg;
-        shift_idex <= shift;
-        operand_2_idex <= operand_2;
-        jumpAddress_idex <= jumpAddress;
-        regWrite_idex <= regWrite;
-        memRead_idex <= memRead;
-        memWrite_idex <= memWrite;
-        aluSrc_idex <= aluSrc;
-        memToReg_idex <= memToReg;
-        pc_idex <= pc_ifid;
-    end
-end
-endmodule
-
 //EX/MEM: Holds ALU result + memory control.
 
 module exmem_register (
     input clk,
+    input jumpFlag,
     input stallForMemoryAccess,
     input [7:0] alu_result, r2, destAddVal,
     input [4:0] dest_addr, // for writing back into a register
@@ -516,7 +619,7 @@ module exmem_register (
 
     output reg [7:0] alu_result_exmem, r2_exmem, destAddVal_exmem,
     output reg [4:0] dest_addr_exmem,
-    output reg regWrite_exmem, memRead_exmem, memWrite_exmem, memToReg_exmem
+    output reg regWrite_exmem, memRead_exmem, memWrite_exmem, memToReg_exmem, jumpFlag_exmem
 );
 
 always @(posedge clk) begin
@@ -529,6 +632,7 @@ always @(posedge clk) begin
         memRead_exmem <= memRead;
         memWrite_exmem <= memWrite;
         memToReg_exmem <= memToReg;
+        jumpFlag_exmem <= jumpFlag;
     end
 end
 endmodule
@@ -586,12 +690,19 @@ module top_level_processor(input clk);
 
 reg [5:0] pc = 0;
 wire [31:0] instruction;
+reg clear;
+
+wire predictionResult_fromBht;
+wire [15:0] jumpAddress_bht;
+
 wire [31:0] instr_ifid;
 wire [5:0] pc_ifid;
+wire [15:0] jumpAddress_ifid;
+wire predictionResult_ifid;
 
 wire [3:0] aluTask;
 wire [4:0] operand_1, destAddrReg, shift;
-wire [15:0] operand_2, jumpAddress;
+wire [15:0] operand_2;
 wire regWrite, memRead, memWrite, aluSrc, memToReg; //flags
 
 wire [3:0] aluTask_idex;
@@ -599,6 +710,7 @@ wire [4:0] operand_1_idex, destAddrReg_idex, shift_idex;
 wire [15:0] operand_2_idex, jumpAddress_idex;
 wire regWrite_idex, memRead_idex, memWrite_idex, aluSrc_idex, memToReg_idex; //flags
 wire [5:0] pc_idex;
+wire predictionResult_idex;
 
 wire [7:0] r1_reg, r2_reg, destAddVal_reg;
 
@@ -638,13 +750,30 @@ instructionMemory im(
     .instruction(instruction)
 );
 
+branchHistoryTable BHT(
+    .clk(clk),
+    .instruction(instruction),
+    .programCounter(pc),
+    .takenOrNot(jumpFlag),
+    .jumpAddress(jumpAddress_bht),
+    .predictionResult(predictionResult_fromBht),
+    .pc_idex(pc_idex),
+    .aluTask_idex(aluTask_idex),
+    .predictionResult_idex(predictionResult_idex)
+);
+
 ifid_register iiReg(
     .clk(clk),
+    .clear(clear),
+    .jumpAddress(jumpAddress_bht),
+    .predictionResult(predictionResult_fromBht),
     .programCounter(pc),
     .stallForMemoryAccess(stallForMemoryAccess),
     .instruction(instruction),
     .instr_ifid(instr_ifid),
-    .pc_ifid(pc_ifid)
+    .pc_ifid(pc_ifid),
+    .jumpAddress_ifid(jumpAddress_ifid),
+    .predictionResult_ifid(predictionResult_ifid)
 );
 
 decode dec(
@@ -655,7 +784,6 @@ decode dec(
     .destAddrReg(destAddrReg),
     .shift(shift),
     .operand_2(operand_2),
-    .jumpAddress(jumpAddress_idex),
     .regWrite(regWrite),
     .memRead(memRead),
     .memWrite(memWrite),
@@ -665,32 +793,35 @@ decode dec(
 
 idex_register ieReg(
     .clk(clk),
+    .clear(clear),
     .stallForMemoryAccess(stallForMemoryAccess),
     .aluTask(aluTask),
     .operand_1(operand_1),
     .destAddrReg(destAddrReg),
     .shift(shift),
     .operand_2(operand_2),
-    .jumpAddress(jumpAddress),
+    .jumpAddress(jumpAddress_ifid),
     .regWrite(regWrite),
     .memRead(memRead),
     .memWrite(memWrite),
     .aluSrc(aluSrc),
     .memToReg(memToReg),
     .pc_ifid(pc_ifid),
+    .predictionResult_ifid(predictionResult_ifid),
 
     .aluTask_idex(aluTask_idex),
     .operand_1_idex(operand_1_idex), 
     .destAddrReg_idex(destAddrReg_idex), 
     .shift_idex(shift_idex),
     .operand_2_idex(operand_2_idex),
-    .jumpAddress_idex(jumpAddress),
+    .jumpAddress_idex(jumpAddress_idex),
     .regWrite_idex(regWrite_idex), 
     .memRead_idex(memRead_idex), 
     .memWrite_idex(memWrite_idex), 
     .aluSrc_idex(aluSrc_idex),
     .memToReg_idex(memToReg_idex),
-    .pc_idex(pc_idex)
+    .pc_idex(pc_idex),
+    .predictionResult_idex(predictionResult_idex)
 );
 
 registerFile regis(
@@ -730,6 +861,7 @@ ALU exec(
 
 exmem_register emReg(
     .clk(clk),
+    .jumpFlag(jumpFlag),
     .stallForMemoryAccess(stallForMemoryAccess),
     .alu_result(alu_result), 
     .r2(r2_reg),
@@ -742,6 +874,7 @@ exmem_register emReg(
 
     .alu_result_exmem(alu_result_exmem),
     .r2_exmem(r2_exmem),
+    .jumpFlag_exmem(jumpFlag_exmem),
     .destAddVal_exmem(destAddVal_exmem),
     .dest_addr_exmem(dest_addr_exmem),
     .regWrite_exmem(regWrite_exmem),
@@ -806,15 +939,39 @@ wbDataMux wbDataSelector(
 
 assign stallForMemoryAccess = ~(hitOrMiss);
 
-always @(posedge clk) begin
-if (hitOrMiss != 0) begin
-    if (jumpFlag == 1) begin
-        pc <= pc_idex + 1 + jumpAddress_idex[5:0];
+//only for clearing in the same cycle
+always @(*) begin
+    if (hitOrMiss != 0) begin
+        if ((predictionResult_idex == 0) & (jumpFlag == 1))
+            clear = 1;
+        else if ((predictionResult_idex == 1) & (jumpFlag == 0))
+            clear = 0;
     end
-    else
-        pc <= pc + 1;
 end
 
+always @(posedge clk) begin
+    if (hitOrMiss != 0) begin
+        //jump logic
+        if (predictionResult_fromBht == 1) begin
+            pc <= pc + 1 + jumpAddress_bht[5:0];
+        end
+        else
+            pc <= pc + 1;
+        
+        if (clear == 1)
+            clear <= 0;
+
+        if (predictionResult_idex == 0) begin
+            if (jumpFlag == 1) begin
+                pc <= pc_idex + 1 + jumpAddress_idex[5:0];
+            end
+        end
+        else if (predictionResult_idex == 1) begin
+            if (jumpFlag == 0) begin
+                pc <= pc_idex + 1;
+            end
+        end
+    end
 end
 
 /*
